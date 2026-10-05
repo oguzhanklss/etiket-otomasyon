@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# PyInstaller çıktıları
+build/
+dist/
+*.spec
+
+# Uygulama ayarı ve üretilen dosyalar
+etiket_gui_ayarlar.json
+*.zip
