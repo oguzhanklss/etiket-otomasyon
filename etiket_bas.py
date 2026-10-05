@@ -60,6 +60,11 @@ ETIKET_SATIRLARI = [
 # False: her satır kendi genişliğine göre en büyük puntoda basılır.
 SATIRLARI_ESITLE = False
 
+# True: metin + barkod bloğu etikette dikey olarak ortalanır; yukarıdaki
+# "üst konum" değerleri yalnızca satırların birbirine göre aralığını belirler.
+# False: üst konumlar etiketin üstünden mutlak ölçülür.
+DIKEY_ORTALA = True
+
 SIRA_BASAMAK = 3             # 12 -> "012". 0 yaparsanız dolgu yapılmaz.
 
 # --- Barkod (örnek etikette yok; istenirse açılır) --------------------
@@ -74,7 +79,8 @@ ETIKET_SATIRLARI_BARKODLU = [
 ]
 BARKOD_Y_MM = 18.0
 BARKOD_YUKSEKLIK_MM = 9.5
-BARKOD_MODUL_TERCIHI = (3, 2, 1)
+BARKOD_MODUL = 0             # Çizgi kalınlığı (nokta): 0 = otomatik (sığan en geniş), 1-4 sabit
+BARKOD_MODUL_TERCIHI = (3, 2, 1)   # Otomatik modda denenecek sıra
 BARKOD_HRI = False
 
 QR_BUYUKLUK = 4              # --qr için ^BQ büyütme oranı (1-10)
@@ -83,8 +89,9 @@ QR_Y_MM = 19.0
 
 # --- Genel ------------------------------------------------------------
 MIN_FONT_MM = 2.0            # Otomatik küçültmede alt sınır
-YAZDIRMA_HIZI = 3            # ^PR (ips), 2..6
-KARARTMA = None              # ^MD, örn. 10. None = yazıcının kendi ayarı
+YAZDIRMA_HIZI = 3            # ^PR (ips), 2..6. Yavaş = daha net
+KARARTMA = None              # ^MD, -30..30. None = yazıcının kendi ayarı.
+                             # Barkod çizgileri kalın/yayılmış çıkıyorsa düşürün (örn. -5)
 
 # --- Dijital önizleme (--onizleme) ------------------------------------
 # Yazıcı olmadan etiketin nasıl çıkacağını PNG olarak gösterir. Tamamen
@@ -141,10 +148,29 @@ def olculeri_hesapla():
 
 olculeri_hesapla()
 
-# ^A0 ölçeklenebilir fontta ortalama karakter ilerlemesinin genişlik
-# parametresine oranı. Font küçültme kararında kullanılır; taşmayı ayrıca
-# ^FB engeller. Yazı beklenenden küçük çıkıyorsa bu değeri düşürün.
-ORT_KARAKTER_ORANI = 0.58
+# Yazıcının yerleşik ^A0 fontunda (CG Triumvirate Bold Condensed) her
+# karakterin ilerlemesi, punto yüksekliğine oranla. Arial Narrow Bold'dan
+# ölçüldü ve gerçek baskıyla doğrulandı (%2-7 sapma, güvenli tarafta).
+# Punto küçültme kararı bu tabloyla verilir; taşmayı ayrıca ^FB keser.
+KARAKTER_GENISLIK = {
+    " ": 0.228, "#": 0.456, "(": 0.273, ")": 0.273, "*": 0.319, "+": 0.479,
+    ",": 0.228, "-": 0.273, ".": 0.228, "/": 0.228, "0": 0.456, "1": 0.456,
+    "2": 0.456, "3": 0.456, "4": 0.456, "5": 0.456, "6": 0.456, "7": 0.456,
+    "8": 0.456, "9": 0.456, ":": 0.273, "A": 0.592, "B": 0.592, "C": 0.592,
+    "D": 0.592, "E": 0.547, "F": 0.501, "G": 0.638, "H": 0.592, "I": 0.228,
+    "J": 0.456, "K": 0.592, "L": 0.501, "M": 0.683, "N": 0.592, "O": 0.638,
+    "P": 0.547, "Q": 0.638, "R": 0.592, "S": 0.547, "T": 0.501, "U": 0.592,
+    "V": 0.547, "W": 0.774, "X": 0.547, "Y": 0.547, "Z": 0.501, "_": 0.456,
+    "a": 0.456, "b": 0.501, "c": 0.456, "d": 0.501, "e": 0.456, "f": 0.273,
+    "g": 0.501, "h": 0.501, "i": 0.228, "j": 0.228, "k": 0.456, "l": 0.228,
+    "m": 0.729, "n": 0.501, "o": 0.501, "p": 0.501, "q": 0.501, "r": 0.319,
+    "s": 0.456, "t": 0.273, "u": 0.501, "v": 0.456, "w": 0.638, "x": 0.456,
+    "y": 0.456, "z": 0.410, "Ç": 0.592, "Ö": 0.638, "Ü": 0.592, "ç": 0.456,
+    "ö": 0.501, "ü": 0.501, "Ğ": 0.638, "ğ": 0.501, "İ": 0.228, "ı": 0.228,
+    "Ş": 0.547, "ş": 0.456,
+}
+KARAKTER_GENISLIK_VARSAYILAN = 0.60   # Tabloda olmayan karakterler için
+GUVENLIK_PAYI = 1.03                   # Hesaplanan genişliğe eklenen pay
 
 TR_ASCII = str.maketrans({
     "ş": "s", "Ş": "S", "ğ": "g", "Ğ": "G", "ı": "i", "İ": "I",
@@ -361,15 +387,21 @@ def excel_yukle(yol):
 #  ZPL üretimi
 # --------------------------------------------------------------------------
 
+def metin_genisligi(metin, h):
+    """Metnin ^A0N,h,h ile basıldığında kaplayacağı genişlik (dot)."""
+    birim = sum(KARAKTER_GENISLIK.get(c, KARAKTER_GENISLIK_VARSAYILAN) for c in metin)
+    return birim * h * GUVENLIK_PAYI
+
+
 def font_sigdir(metin, genislik_dot, istenen_mm):
-    """Metni verilen genişliğe sığdıran font yüksekliğini (dot) döndür."""
+    """Metni verilen genişliğe sığdıran en büyük font yüksekliğini (dot) döndür."""
     h = mm(istenen_mm)
     if not metin:
         return h
-    h_min = mm(MIN_FONT_MM)
-    while h > h_min and len(metin) * h * ORT_KARAKTER_ORANI > genislik_dot:
-        h -= 1
-    return h
+    birim = metin_genisligi(metin, 1)
+    if birim > 0:
+        h = min(h, int(genislik_dot / birim))
+    return max(h, mm(MIN_FONT_MM))
 
 
 def code128_modul_sayisi(n):
@@ -422,31 +454,71 @@ def etiket_satirlari(e, tr_ascii=False, barkodlu=False):
     return satirlar
 
 
+def barkod_modulu(payload, uyarilar):
+    """Code 128 çizgi kalınlığı (dot). Sığmazsa None."""
+    moduller = code128_modul_sayisi(len(payload))
+    if BARKOD_MODUL:
+        if moduller * BARKOD_MODUL <= KULLANILABILIR_DOT:
+            return BARKOD_MODUL
+        uyarilar.append("seri no %r için %d noktalık barkod etikete sığmıyor, "
+                        "otomatik kalınlık kullanıldı" % (payload, BARKOD_MODUL))
+    return next((x for x in BARKOD_MODUL_TERCIHI if moduller * x <= KULLANILABILIR_DOT), None)
+
+
+def etiket_yerlesim(e, tr_ascii=False, barkod=False, qr=False, uyarilar=None):
+    """Bir etiketin tüm öğelerini nokta (dot) koordinatlarıyla hesapla.
+    DIKEY_ORTALA açıksa blok etikete ortalanır. ZPL ve önizleme bunu kullanır.
+
+    Dönüş: dict(satirlar=[(metin, y_dot, h_dot)], payload, barkod_w, barkod_y,
+                 barkod_h, qr_y, qr_x)
+    """
+    uyarilar = uyarilar if uyarilar is not None else []
+    satirlar = [(m, mm(y), h) for m, y, h in etiket_satirlari(e, tr_ascii, barkodlu=(barkod or qr))]
+    payload = barkod_payload(e.seri, uyarilar) if (barkod or qr) else ""
+    barkod_w = barkod_modulu(payload, uyarilar) if (barkod and payload) else None
+    if barkod and payload and barkod_w is None:
+        uyarilar.append("seri no %r (%d karakter) barkod olarak sığmıyor, barkod basılmadı"
+                        % (e.seri, len(payload)))
+    barkod_y, barkod_h = mm(BARKOD_Y_MM), mm(BARKOD_YUKSEKLIK_MM)
+    qr_y, qr_x = mm(QR_Y_MM), mm(QR_X_MM)
+
+    if DIKEY_ORTALA:
+        ustler = [y for _, y, _ in satirlar]
+        altlar = [y + h for _, y, h in satirlar]
+        if barkod_w:
+            ustler.append(barkod_y); altlar.append(barkod_y + barkod_h)
+        if qr and payload:
+            ustler.append(qr_y); altlar.append(qr_y + 33 * QR_BUYUKLUK)   # ~25 modül + sessiz bölge
+        if ustler:
+            ust, alt = min(ustler), max(altlar)
+            kaydir = (YUKSEKLIK_DOT - (alt - ust)) // 2 - ust
+            kaydir = max(kaydir, -ust)                      # üstten taşmasın
+            satirlar = [(m, y + kaydir, h) for m, y, h in satirlar]
+            barkod_y += kaydir
+            qr_y += kaydir
+
+    return dict(satirlar=satirlar, payload=payload, barkod_w=barkod_w,
+                barkod_y=barkod_y, barkod_h=barkod_h, qr_y=qr_y, qr_x=qr_x)
+
+
 def etiket_zpl(e, kopya=1, barkod=False, qr=False, tr_ascii=False, uyarilar=None):
     uyarilar = uyarilar if uyarilar is not None else []
+    Y = etiket_yerlesim(e, tr_ascii, barkod, qr, uyarilar)
     out = ["^XA", "^CI28",
            "^PW%d" % GENISLIK_DOT, "^LL%d" % YUKSEKLIK_DOT, "^LH0,0", "^LS0"]
 
-    for metin, y_mm, h in etiket_satirlari(e, tr_ascii, barkodlu=(barkod or qr)):
+    for metin, y, h in Y["satirlar"]:
         out.append("^FO%d,%d^A0N,%d,%d^FB%d,1,0,L,0^FD%s^FS"
-                   % (SOL_DOT, mm(y_mm), h, h, KULLANILABILIR_DOT, metin))
+                   % (SOL_DOT, y, h, h, KULLANILABILIR_DOT, metin))
 
-    if qr or barkod:
-        payload = barkod_payload(e.seri, uyarilar)
-        if payload and qr:
-            out.append("^FO%d,%d^BQN,2,%d,M,7^FDMM,A%s^FS"
-                       % (mm(QR_X_MM), mm(QR_Y_MM), QR_BUYUKLUK, zpl_guvenli(payload)))
-        elif payload:
-            w = next((x for x in BARKOD_MODUL_TERCIHI
-                      if code128_modul_sayisi(len(payload)) * x <= KULLANILABILIR_DOT), None)
-            if w is None:
-                uyarilar.append("seri no %r (%d karakter) barkod olarak sığmıyor, "
-                                "barkod basılmadı" % (e.seri, len(payload)))
-            else:
-                out.append("^BY%d,2.5,%d" % (w, mm(BARKOD_YUKSEKLIK_MM)))
-                out.append("^FO%d,%d^BCN,%d,%s,N,N,A^FD%s^FS"
-                           % (SOL_DOT, mm(BARKOD_Y_MM), mm(BARKOD_YUKSEKLIK_MM),
-                              "Y" if BARKOD_HRI else "N", zpl_guvenli(payload)))
+    if qr and Y["payload"]:
+        out.append("^FO%d,%d^BQN,2,%d,M,7^FDMM,A%s^FS"
+                   % (Y["qr_x"], Y["qr_y"], QR_BUYUKLUK, zpl_guvenli(Y["payload"])))
+    elif Y["barkod_w"]:
+        out.append("^BY%d,3,%d" % (Y["barkod_w"], Y["barkod_h"]))
+        out.append("^FO%d,%d^BCN,%d,%s,N,N,A^FD%s^FS"
+                   % (SOL_DOT, Y["barkod_y"], Y["barkod_h"],
+                      "Y" if BARKOD_HRI else "N", zpl_guvenli(Y["payload"])))
 
     if kopya > 1:
         out.append("^PQ%d,0,0,N" % kopya)
@@ -519,7 +591,7 @@ def _code128b_desen(veri):
 
 def etiket_ciz(d, e, cx, cy, k, barkod=False, qr=False, tr_ascii=False):
     """Tek bir etiketi (cx, cy) köşesinden başlayarak PIL çizim nesnesine çiz.
-    k = ölçek (1 yazıcı noktası kaç piksel)."""
+    k = ölçek (1 yazıcı noktası kaç piksel). ZPL ile aynı yerleşimi kullanır."""
     et_w, et_h = GENISLIK_DOT * k, YUKSEKLIK_DOT * k
     d.rectangle([cx, cy, cx + et_w, cy + et_h], fill=(255, 255, 255),
                 outline=(150, 155, 162))
@@ -527,34 +599,27 @@ def etiket_ciz(d, e, cx, cy, k, barkod=False, qr=False, tr_ascii=False):
     d.rectangle([cx + SOL_DOT * k, cy, cx + et_w - SOL_DOT * k, cy + et_h],
                 outline=(232, 234, 238))
 
-    for metin, y_mm, h_dot in etiket_satirlari(e, tr_ascii, barkodlu=(barkod or qr)):
-        f = _onizleme_font(max(1, int(h_dot * k)))
-        d.text((cx + SOL_DOT * k, cy + mm(y_mm) * k), metin, font=f, fill=(0, 0, 0))
+    Y = etiket_yerlesim(e, tr_ascii, barkod, qr)
+    for metin, y, h in Y["satirlar"]:
+        f = _onizleme_font(max(1, int(h * k)))
+        d.text((cx + SOL_DOT * k, cy + y * k), metin, font=f, fill=(0, 0, 0))
 
-    if not (barkod or qr):
-        return
-    payload = barkod_payload(e.seri, [])
-    if payload and qr:
-        qw = int(21 * QR_BUYUKLUK * k)
-        d.rectangle([cx + mm(QR_X_MM) * k, cy + mm(QR_Y_MM) * k,
-                     cx + mm(QR_X_MM) * k + qw, cy + mm(QR_Y_MM) * k + qw],
-                    outline=(0, 0, 0))
-        d.text((cx + mm(QR_X_MM) * k + 3, cy + mm(QR_Y_MM) * k + 3),
-               "QR", font=_onizleme_font(max(10, 6 * k)), fill=(120, 120, 120))
-    elif payload:
-        w = next((x for x in BARKOD_MODUL_TERCIHI
-                  if code128_modul_sayisi(len(payload)) * x <= KULLANILABILIR_DOT), None)
-        if w:
-            x = cx + SOL_DOT * k
-            y0 = cy + mm(BARKOD_Y_MM) * k
-            y1 = y0 + mm(BARKOD_YUKSEKLIK_MM) * k
-            siyah = True
-            for ch in _code128b_desen(payload):
-                gen = int(ch) * w * k
-                if siyah:
-                    d.rectangle([x, y0, x + gen - 1, y1], fill=(0, 0, 0))
-                x += gen
-                siyah = not siyah
+    if qr and Y["payload"]:
+        qw = int(25 * QR_BUYUKLUK * k)
+        x0, y0 = cx + Y["qr_x"] * k, cy + Y["qr_y"] * k
+        d.rectangle([x0, y0, x0 + qw, y0 + qw], outline=(0, 0, 0))
+        d.text((x0 + 3, y0 + 3), "QR", font=_onizleme_font(max(10, 6 * k)), fill=(120, 120, 120))
+    elif Y["barkod_w"]:
+        x = cx + SOL_DOT * k
+        y0 = cy + Y["barkod_y"] * k
+        y1 = y0 + Y["barkod_h"] * k
+        siyah = True
+        for ch in _code128b_desen(Y["payload"]):
+            gen = int(ch) * Y["barkod_w"] * k
+            if siyah:
+                d.rectangle([x, y0, x + gen - 1, y1], fill=(0, 0, 0))
+            x += gen
+            siyah = not siyah
 
 
 def onizleme_goruntu(etiketler, barkod=False, qr=False, tr_ascii=False,

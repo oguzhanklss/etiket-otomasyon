@@ -204,8 +204,16 @@ kadar düşürür, ayrıca ZPL `^FB` alanı fazlasını keser.
 
 * `MIN_FONT_MM` — alt sınır (varsayılan 2.0 mm)
 * `SATIRLARI_ESITLE = True` yaparsanız üç satır da aynı puntoda basılır
-* `ORT_KARAKTER_ORANI` — yazı beklenenden **küçük** çıkıyorsa bu değeri düşürün
-  (0.58 → 0.52), **taşıyorsa** yükseltin
+* `KARAKTER_GENISLIK` — her karakterin punto yüksekliğine oranla genişliği.
+  Yazıcının yerleşik fontundan (CG Triumvirate Bold Condensed) gerçek baskıyla
+  doğrulanmıştır. Yazı **taşıyorsa** `GUVENLIK_PAYI`'nı yükseltin (1.03 → 1.08),
+  sağda gereksiz boşluk kalıyorsa düşürün.
+
+### Dikey ortalama
+
+`DIKEY_ORTALA = True` (varsayılan) iken metin + barkod bloğu etikete dikey
+olarak ortalanır; satırların "üst konum" değerleri yalnızca birbirlerine göre
+aralığı belirler. `False` yaparsanız konumlar etiketin üstünden mutlak ölçülür.
 
 ### Ürün kısa kodları
 
@@ -293,8 +301,19 @@ BARKOD_YUKSEKLIK_MM = 9.5
 Barkodlu düzeni değiştirmek için `ETIKET_SATIRLARI`'nı değil bu listeyi
 düzenleyin. `--onizleme --barkod` ile sonucu görebilirsiniz.
 
-Modül genişliği seri no uzunluğuna göre otomatik seçilir (3 → 2 → 1 dot).
-Sığmazsa barkod basılmaz ve uyarı verilir.
+**Çizgi kalınlığı** (`BARKOD_MODUL`): `0` = otomatik, seri numarasına göre
+sığan en geniş modül seçilir (3 → 2 → 1 nokta); `1`-`4` sabit. 20 karakterlik
+bir seri no 50 mm'ye ancak 1 noktayla sığar — bu yazıcının çizebileceği en ince
+çizgidir. Çizgiler yine de kalın/yayılmış görünüyorsa sorun termal yayılmadır:
+`KARARTMA` (^MD) değerini düşürün (örn. `-5`) ve/veya `YAZDIRMA_HIZI`'nı 2'ye
+indirin. Sığmazsa barkod basılmaz ve uyarı verilir.
+
+Seri numarası satırını büyütmek için seçenekler (uzun seri numaralarında genişlik
+sınırlayıcıdır):
+
+* Şablondan `S/N:` önekini kaldırın → `"{seri}"` (4 karakter = ~%17 daha büyük)
+* `KENAR_BOSLUK_X_MM`'yi 2.0 → 1.0 yapın (+16 nokta genişlik)
+* Barkodu kapatın; barkodsuz düzende punto 6.4 mm'ye kadar çıkar
 
 ---
 
@@ -401,9 +420,9 @@ kapatılırsa "Yenile" düğmesiyle elle yenilenir.
 | **3. Satır aralığı** | Excel satırı ya da etiket sırası; boş = tamamı |
 | **4. Ürün kodu** | `HPLAPTOP` → `HPLAPTOP-001`. Boş bırakılırsa otomatik (bkz. bölüm 6) |
 | **5. Etiket boyutu** | Genişlik / yükseklik / kenar (mm), 203 veya 300 dpi |
-| **6. Etiket satırları** | Her satır için şablon, üst konum ve **punto ayrı ayrı**. Satır ekle/sil, varsayılana dön |
-| **7. Barkod** | Yok / Code 128 / QR. Açılınca barkodlu düzen tablosu gelir, konum ve boyut ayarlanır |
-| **8. Diğer** | Türkçe→ASCII, kopya sayısı |
+| **6. Etiket satırları** | Her satır için şablon, üst konum ve **punto ayrı ayrı**. Satır ekle/sil, varsayılana dön, dikey ortala |
+| **7. Barkod** | Yok / Code 128 / QR. Açılınca barkodlu düzen tablosu gelir; konum, boyut ve çizgi kalınlığı ayarlanır |
+| **8. Diğer** | Türkçe→ASCII, kopya sayısı, karartma (^MD), baskı hızı |
 | **9. Yazıcı** | Kurulu yazıcı listesi ya da IP:port |
 
 Sağ panel: ◀ ▶ ile seçimdeki etiketler arasında gezilir, **PNG kaydet** ilk 12

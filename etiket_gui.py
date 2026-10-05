@@ -239,7 +239,10 @@ class Uygulama(ctk.CTk):
                       text_color=("gray20", "gray80"), command=self._satirlari_sifirla).pack(side="left")
         f = self._satir_cercevesi()
         self.ck_esitle = ctk.CTkCheckBox(f, text="Tüm satırlar aynı punto", command=self._yenile_planla)
-        self.ck_esitle.pack(side="left")
+        self.ck_esitle.pack(side="left", padx=(0, 14))
+        self.ck_ortala = ctk.CTkCheckBox(f, text="Dikey ortala", command=self._yenile_planla)
+        self.ck_ortala.select()
+        self.ck_ortala.pack(side="left")
         f = self._satir_cercevesi()
         self.e_basamak = self._girdi(f, "Sıra no basamak", 44, str(E.SIRA_BASAMAK))
         self.e_minfont = self._girdi(f, "En küçük punto (mm)", 50, "%g" % E.MIN_FONT_MM)
@@ -255,6 +258,12 @@ class Uygulama(ctk.CTk):
         self.f_barkod = self._satir_cercevesi()
         self.e_bk_y = self._girdi(self.f_barkod, "Barkod üst", 55, "%g" % E.BARKOD_Y_MM)
         self.e_bk_h = self._girdi(self.f_barkod, "Yükseklik", 55, "%g" % E.BARKOD_YUKSEKLIK_MM)
+        ctk.CTkLabel(self.f_barkod, text="Çizgi").pack(side="left", padx=(0, 4))
+        self.cb_bk_modul = ctk.CTkComboBox(self.f_barkod, width=105, state="readonly",
+                                           values=["Otomatik", "1 nokta", "2 nokta", "3 nokta", "4 nokta"],
+                                           command=lambda _v: self._yenile_planla())
+        self.cb_bk_modul.set("Otomatik")
+        self.cb_bk_modul.pack(side="left")
         self.f_qr = self._satir_cercevesi()
         self.e_qr_x = self._girdi(self.f_qr, "QR sol", 50, "%g" % E.QR_X_MM)
         self.e_qr_y = self._girdi(self.f_qr, "üst", 50, "%g" % E.QR_Y_MM)
@@ -269,6 +278,14 @@ class Uygulama(ctk.CTk):
                                           command=self._yenile_planla)
         self.ck_trascii.pack(side="left", padx=(0, 14))
         self.e_kopya = self._girdi(f, "Kopya", 44, "1")
+        f = self._satir_cercevesi()
+        self.e_karartma = self._girdi(f, "Karartma (^MD)", 50, "")
+        self.e_hiz = self._girdi(f, "Hız (ips)", 44, str(E.YAZDIRMA_HIZI))
+        ctk.CTkLabel(self.sol, anchor="w", justify="left", wraplength=440,
+                     text_color=("gray30", "gray70"),
+                     text="Karartma -30..30, boş = yazıcı ayarı. Barkod çizgileri kalın/yayılmış "
+                          "çıkıyorsa düşürün (örn. -5). Hız 2-6; yavaş = daha net."
+                     ).pack(fill="x", padx=8)
 
         # ---- 9. Yazıcı
         self._baslik("9. Yazıcı")
@@ -540,6 +557,11 @@ class Uygulama(ctk.CTk):
             E.ETIKET_SATIRLARI_BARKODLU = satirlar
 
         E.SATIRLARI_ESITLE = bool(self.ck_esitle.get())
+        E.DIKEY_ORTALA = bool(self.ck_ortala.get())
+        E.BARKOD_MODUL = sayi(self.cb_bk_modul.get().split()[0], 0, tam=True) or 0
+        k = sayi(self.e_karartma.get(), None, tam=True)
+        E.KARARTMA = max(-30, min(30, k)) if k is not None else None
+        E.YAZDIRMA_HIZI = max(2, min(6, sayi(self.e_hiz.get(), 3, tam=True) or 3))
         E.SIRA_BASAMAK = max(0, sayi(self.e_basamak.get(), 3, tam=True) or 0)
         E.MIN_FONT_MM = max(0.5, sayi(self.e_minfont.get(), 2.0) or 2.0)
 
@@ -830,6 +852,9 @@ class Uygulama(ctk.CTk):
             "satirlar": self.satirlar_normal,
             "satirlar_barkodlu": self.satirlar_barkodlu,
             "esitle": bool(self.ck_esitle.get()),
+            "ortala": bool(self.ck_ortala.get()),
+            "bk_modul": self.cb_bk_modul.get(),
+            "karartma": self.e_karartma.get(), "hiz": self.e_hiz.get(),
             "basamak": self.e_basamak.get(), "min_punto": self.e_minfont.get(),
             "kod_modu": self.seg_kod.get(),
             "bk_y": self.e_bk_y.get(), "bk_h": self.e_bk_h.get(),
@@ -871,7 +896,8 @@ class Uygulama(ctk.CTk):
                                ("min_punto", self.e_minfont), ("bk_y", self.e_bk_y),
                                ("bk_h", self.e_bk_h), ("qr_x", self.e_qr_x), ("qr_y", self.e_qr_y),
                                ("qr_b", self.e_qr_b), ("kopya", self.e_kopya), ("ip", self.e_ip),
-                               ("port", self.e_port), ("bas", self.e_bas), ("son", self.e_son)):
+                               ("port", self.e_port), ("bas", self.e_bas), ("son", self.e_son),
+                               ("karartma", self.e_karartma), ("hiz", self.e_hiz)):
             if anahtar in a:
                 koy(entry, a[anahtar])
         if a.get("dpi"):
@@ -881,6 +907,9 @@ class Uygulama(ctk.CTk):
         if a.get("satirlar_barkodlu"):
             self.satirlar_barkodlu = [list(s) for s in a["satirlar_barkodlu"]]
         (self.ck_esitle.select if a.get("esitle") else self.ck_esitle.deselect)()
+        (self.ck_ortala.select if a.get("ortala", True) else self.ck_ortala.deselect)()
+        if a.get("bk_modul") in (self.cb_bk_modul.cget("values") or []):
+            self.cb_bk_modul.set(a["bk_modul"])
         (self.ck_trascii.select if a.get("tr_ascii") else self.ck_trascii.deselect)()
         (self.sw_oto.select if a.get("oto_onizleme", True) else self.sw_oto.deselect)()
         if a.get("aralik_modu") in ("Excel satırı", "Etiket sırası"):
