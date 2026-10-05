@@ -1,0 +1,14 @@
+# COP-31 etiket yazdırma — gerekli paketler
+# Kurulum:  pip install -r requirements.txt
+
+openpyxl>=3.1
+
+# Windows'ta yazıcıya RAW gönderebilmek için (sadece Windows'a kurulur).
+# macOS/Linux'ta CUPS'un 'lp' komutu kullanılır, ek paket gerekmez.
+pywin32>=306; sys_platform == "win32"
+
+# Önizleme (PNG render) için. Komut satırında --onizleme ve GUI kullanır.
+Pillow>=9.0
+
+# Grafik arayüz (etiket_gui.py) için.
+customtkinter>=5.2

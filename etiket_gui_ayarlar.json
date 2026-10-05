@@ -1,0 +1,63 @@
+{
+  "excel": "/Users/oguzhankeles/Documents/cop31-etiket/COP-31 DEMİRBAŞLAR.xlsx",
+  "sheet": "11.MONİTÖR",
+  "aralik_modu": "Excel satırı",
+  "bas": "31",
+  "son": "262",
+  "kod": "EKRAN",
+  "genislik": "50",
+  "yukseklik": "30",
+  "kenar": "2",
+  "dpi": "203 dpi (8 dot/mm)",
+  "satirlar": [
+    [
+      "ŞARTNAME NO:{sartname}",
+      3.5,
+      6.4
+    ],
+    [
+      "S/N:{seri}",
+      13.0,
+      7.0
+    ],
+    [
+      "{urun}",
+      20.0,
+      6.4
+    ]
+  ],
+  "satirlar_barkodlu": [
+    [
+      "ŞARTNAME NO:{sartname}",
+      1.2,
+      4.6
+    ],
+    [
+      "S/N:{seri}",
+      6.5,
+      4.6
+    ],
+    [
+      "{urun}",
+      11.8,
+      4.6
+    ]
+  ],
+  "esitle": false,
+  "basamak": "3",
+  "min_punto": "3.6",
+  "kod_modu": "Yok",
+  "bk_y": "18",
+  "bk_h": "9.5",
+  "qr_x": "37",
+  "qr_y": "19",
+  "qr_b": "4",
+  "tr_ascii": false,
+  "kopya": "1",
+  "yazici_modu": "Kurulu yazıcı",
+  "yazici": "Brother_MFC_L3750CDW_series",
+  "ip": "",
+  "port": "9100",
+  "oto_onizleme": true,
+  "pencere": "1320x860+5+38"
+}
