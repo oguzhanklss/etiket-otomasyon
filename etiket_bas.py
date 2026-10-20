@@ -87,6 +87,27 @@ QR_BUYUKLUK = 4              # --qr için ^BQ büyütme oranı (1-10)
 QR_X_MM = 37.0
 QR_Y_MM = 19.0
 
+# --- Logo -------------------------------------------------------------
+# SVG, PNG, JPG, BMP veya GIF dosyası. Yazıcıya siyah-beyaz bitmap olarak
+# gönderilir: iş başında ~DG ile bir kez yüklenir, her etikette ^XG ile
+# çağrılır. SVG için 'resvg-py' paketi gerekir (requirements.txt'te var).
+LOGO_DOSYA = ""              # Boş = logo yok. --logo ile de verilir.
+LOGO_KONUM = "ust"           # "ust"     : metnin üstünde, metin aşağı kayar
+                             # "alt"     : metnin (ve barkodun) altında
+                             # "sag"     : metnin sağında, metin daralır
+                             # "sol"     : metnin solunda, metin daralır
+                             # "serbest" : LOGO_X_MM / LOGO_Y_MM ile mutlak konum
+LOGO_GENISLIK_MM = 20.0      # Logo bu kutuya en-boy oranı korunarak sığdırılır
+LOGO_YUKSEKLIK_MM = 6.0
+LOGO_HIZA = "orta"           # ust/alt için yatay hiza: "sol", "orta", "sag"
+LOGO_X_MM = 2.0              # serbest: sol kenardan uzaklık
+LOGO_Y_MM = None             # serbest: üstten uzaklık. sag/sol: None = dikey ortala.
+                             # ust: logonun üstünde bırakılacak boşluk (None = 0)
+LOGO_BOSLUK_MM = 1.5         # Logo ile metin arasındaki boşluk
+LOGO_ESIK = 128              # Gri -> siyah eşiği (0-255). Büyütürseniz daha çok siyah
+LOGO_NOKTALA = False         # True: gri tonları noktalama (dither) ile taklit et
+LOGO_ZPL_ADI = "R:LOGO.GRF"  # Yazıcı belleğindeki grafik adı
+
 # --- Genel ------------------------------------------------------------
 MIN_FONT_MM = 2.0            # Otomatik küçültmede alt sınır
 YAZDIRMA_HIZI = 3            # ^PR (ips), 2..6. Yavaş = daha net
@@ -418,11 +439,15 @@ def barkod_payload(seri, uyarilar):
     return temiz
 
 
-def etiket_satirlari(e, tr_ascii=False, barkodlu=False):
+def etiket_satirlari(e, tr_ascii=False, barkodlu=False, genislik_dot=None):
     """Etiket satırı şablonlarını doldur, punto hesapla.
     ZPL üretimi ve önizleme bu aynı fonksiyonu kullanır.
+    genislik_dot: metnin sığdırılacağı genişlik (None = KULLANILABILIR_DOT;
+    logo sağda/solda ise daralmış genişlik verilir).
     Dönüş: [(metin, üst_konum_mm, punto_dot), ...]"""
     duzen = ETIKET_SATIRLARI_BARKODLU if barkodlu else ETIKET_SATIRLARI
+    if genislik_dot is None:
+        genislik_dot = KULLANILABILIR_DOT
     alanlar = {
         "sartname": e.sartname,
         "seri": e.seri,
@@ -446,7 +471,7 @@ def etiket_satirlari(e, tr_ascii=False, barkodlu=False):
         metin = zpl_guvenli(metin)
         if tr_ascii:
             metin = metin.translate(TR_ASCII)
-        satirlar.append((metin, y_mm, font_sigdir(metin, KULLANILABILIR_DOT, font_mm)))
+        satirlar.append((metin, y_mm, font_sigdir(metin, genislik_dot, font_mm)))
 
     if SATIRLARI_ESITLE and satirlar:
         ortak = min(h for _, _, h in satirlar)
@@ -454,51 +479,220 @@ def etiket_satirlari(e, tr_ascii=False, barkodlu=False):
     return satirlar
 
 
-def barkod_modulu(payload, uyarilar):
+def barkod_modulu(payload, uyarilar, genislik_dot=None):
     """Code 128 çizgi kalınlığı (dot). Sığmazsa None."""
+    if genislik_dot is None:
+        genislik_dot = KULLANILABILIR_DOT
     moduller = code128_modul_sayisi(len(payload))
     if BARKOD_MODUL:
-        if moduller * BARKOD_MODUL <= KULLANILABILIR_DOT:
+        if moduller * BARKOD_MODUL <= genislik_dot:
             return BARKOD_MODUL
         uyarilar.append("seri no %r için %d noktalık barkod etikete sığmıyor, "
                         "otomatik kalınlık kullanıldı" % (payload, BARKOD_MODUL))
-    return next((x for x in BARKOD_MODUL_TERCIHI if moduller * x <= KULLANILABILIR_DOT), None)
+    return next((x for x in BARKOD_MODUL_TERCIHI if moduller * x <= genislik_dot), None)
+
+
+# --------------------------------------------------------------------------
+#  Logo (SVG / PNG / JPG ...) -> 1-bit bitmap -> ZPL ~DG
+# --------------------------------------------------------------------------
+
+LOGO_UZANTILAR = (".svg", ".svgz", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff")
+_LOGO_ONBELLEK = {}
+
+
+def _logo_goruntu_yukle(yol, kutu_w, kutu_h):
+    """Dosyayı RGBA PIL görüntüsü olarak, (kutu_w x kutu_h) nokta kutusuna
+    en-boy oranı korunarak sığdırılmış hâlde döndür."""
+    import io
+    from PIL import Image
+
+    uzanti = os.path.splitext(yol)[1].lower()
+    if uzanti in (".svg", ".svgz"):
+        try:
+            import resvg_py
+        except ImportError:
+            sys.exit("HATA: SVG logo için 'resvg-py' paketi gerekir.\n"
+                     "      Kurmak için: pip install resvg-py\n"
+                     "      (ya da logoyu PNG olarak kaydedip onu kullanın)")
+        try:
+            # Önce doğal boyutu öğren (en-boy oranı için), sonra sınırlayıcı kenara göre çiz.
+            dogal = Image.open(io.BytesIO(resvg_py.svg_to_bytes(svg_path=yol)))
+            dw, dh = dogal.size
+            if dw * kutu_h > dh * kutu_w:          # geniş logo: genişlik sınırlar
+                png = resvg_py.svg_to_bytes(svg_path=yol, width=int(kutu_w))
+            else:
+                png = resvg_py.svg_to_bytes(svg_path=yol, height=int(kutu_h))
+            im = Image.open(io.BytesIO(png)).convert("RGBA")
+        except (ValueError, OSError) as ex:
+            sys.exit("HATA: SVG logo çizilemedi: %s\n      %s" % (yol, ex))
+        # resvg tam sayıya yuvarlar; kutuyu 1 nokta aşarsa kırp
+        if im.width > kutu_w or im.height > kutu_h:
+            im = im.crop((0, 0, min(im.width, kutu_w), min(im.height, kutu_h)))
+        return im
+
+    try:
+        im = Image.open(yol)
+        im.load()
+    except (OSError, ValueError) as ex:
+        sys.exit("HATA: Logo dosyası açılamadı: %s\n      %s" % (yol, ex))
+    im = im.convert("RGBA")
+    oran = min(kutu_w / im.width, kutu_h / im.height)
+    yeni = (max(1, int(round(im.width * oran))), max(1, int(round(im.height * oran))))
+    if yeni != im.size:
+        im = im.resize(yeni, Image.LANCZOS)
+    return im
+
+
+def logo_hazirla(yol=None, genislik_mm=None, yukseklik_mm=None, esik=None, noktala=None):
+    """LOGO_* ayarlarına göre logoyu 1-bit bitmap'e çevir ve ZPL ~DG komutunu üret.
+    Sonuç önbelleğe alınır (aynı dosya + boyut + eşik için bir kez çizilir).
+
+    Dönüş: None (logo yok) ya da dict:
+        img   : PIL Image, mode '1' (0 = siyah), genişliği 8'in katına tamamlanmış
+        w, h  : logonun gerçek nokta boyutu (dolgu hariç)
+        bpr   : satır başına bayt
+        dg    : ~DG komutu (iş başlığına eklenir)
+        xg    : ^XG parçası (^FO sonrasına eklenir)
+    """
+    yol = LOGO_DOSYA if yol is None else yol
+    if not yol:
+        return None
+    genislik_mm = LOGO_GENISLIK_MM if genislik_mm is None else genislik_mm
+    yukseklik_mm = LOGO_YUKSEKLIK_MM if yukseklik_mm is None else yukseklik_mm
+    esik = LOGO_ESIK if esik is None else esik
+    noktala = LOGO_NOKTALA if noktala is None else noktala
+
+    if not os.path.exists(yol):
+        sys.exit("HATA: Logo dosyası bulunamadı: %s" % yol)
+    if os.path.splitext(yol)[1].lower() not in LOGO_UZANTILAR:
+        sys.exit("HATA: Desteklenmeyen logo türü: %s\n      Desteklenen: %s"
+                 % (yol, ", ".join(LOGO_UZANTILAR)))
+    kutu_w, kutu_h = max(8, mm(genislik_mm)), max(1, mm(yukseklik_mm))
+    anahtar = (os.path.abspath(yol), os.path.getmtime(yol), kutu_w, kutu_h, esik, bool(noktala))
+    if anahtar in _LOGO_ONBELLEK:
+        return _LOGO_ONBELLEK[anahtar]
+
+    try:
+        from PIL import Image
+    except ImportError:
+        sys.exit("HATA: Logo için 'Pillow' paketi gerekir.\n      Kurmak için: pip install Pillow")
+
+    rgba = _logo_goruntu_yukle(yol, kutu_w, kutu_h)
+    w, h = rgba.size
+    # Saydam alanlar beyaz sayılır
+    zemin = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    zemin.alpha_composite(rgba)
+    gri = zemin.convert("L")
+    if noktala:
+        bw = gri.convert("1")                                   # Floyd-Steinberg
+    else:
+        esik = max(0, min(255, int(esik)))
+        bw = gri.point(lambda p: 255 if p > esik else 0).convert("1", dither=Image.NONE)
+
+    # Genişliği 8'in katına tamamla (sağ taraf beyaz), satırlar tam bayt olsun
+    w8 = (w + 7) // 8 * 8
+    if w8 != w:
+        dolgu = Image.new("1", (w8, h), 1)
+        dolgu.paste(bw, (0, 0))
+        bw = dolgu
+    bpr = w8 // 8
+    # PIL '1' modunda 1 = beyaz; ZPL'de 1 = siyah -> bitleri tersle
+    veri = bytes(b ^ 0xFF for b in bw.tobytes())
+    toplam = bpr * h
+    dg = "~DG%s,%d,%d,%s" % (LOGO_ZPL_ADI, toplam, bpr, veri.hex().upper())
+    sonuc = dict(img=bw, w=w, h=h, bpr=bpr, dg=dg, xg="^XG%s,1,1" % LOGO_ZPL_ADI,
+                 yol=yol)
+    _LOGO_ONBELLEK[anahtar] = sonuc
+    return sonuc
 
 
 def etiket_yerlesim(e, tr_ascii=False, barkod=False, qr=False, uyarilar=None):
     """Bir etiketin tüm öğelerini nokta (dot) koordinatlarıyla hesapla.
     DIKEY_ORTALA açıksa blok etikete ortalanır. ZPL ve önizleme bunu kullanır.
 
-    Dönüş: dict(satirlar=[(metin, y_dot, h_dot)], payload, barkod_w, barkod_y,
-                 barkod_h, qr_y, qr_x)
+    Dönüş: dict(satirlar=[(metin, y_dot, h_dot)], metin_x, metin_w,
+                 payload, barkod_w, barkod_x, barkod_y, barkod_h, qr_y, qr_x,
+                 logo (dict | None), logo_x, logo_y)
     """
     uyarilar = uyarilar if uyarilar is not None else []
-    satirlar = [(m, mm(y), h) for m, y, h in etiket_satirlari(e, tr_ascii, barkodlu=(barkod or qr))]
+    logo = logo_hazirla()
+    konum = LOGO_KONUM if logo else None
+    bosluk = mm(LOGO_BOSLUK_MM)
+
+    # Metin alanı: logo sağda/solda ise daralır
+    metin_x, metin_w = SOL_DOT, KULLANILABILIR_DOT
+    if konum in ("sag", "sol"):
+        metin_w = max(8, KULLANILABILIR_DOT - logo["w"] - bosluk)
+        if konum == "sol":
+            metin_x = SOL_DOT + logo["w"] + bosluk
+
+    satirlar = [(m, mm(y), h) for m, y, h in
+                etiket_satirlari(e, tr_ascii, barkodlu=(barkod or qr), genislik_dot=metin_w)]
     payload = barkod_payload(e.seri, uyarilar) if (barkod or qr) else ""
-    barkod_w = barkod_modulu(payload, uyarilar) if (barkod and payload) else None
+    barkod_w = barkod_modulu(payload, uyarilar, metin_w) if (barkod and payload) else None
     if barkod and payload and barkod_w is None:
         uyarilar.append("seri no %r (%d karakter) barkod olarak sığmıyor, barkod basılmadı"
                         % (e.seri, len(payload)))
     barkod_y, barkod_h = mm(BARKOD_Y_MM), mm(BARKOD_YUKSEKLIK_MM)
     qr_y, qr_x = mm(QR_Y_MM), mm(QR_X_MM)
+    logo_x = logo_y = 0
 
-    if DIKEY_ORTALA:
-        ustler = [y for _, y, _ in satirlar]
-        altlar = [y + h for _, y, h in satirlar]
-        if barkod_w:
-            ustler.append(barkod_y); altlar.append(barkod_y + barkod_h)
-        if qr and payload:
-            ustler.append(qr_y); altlar.append(qr_y + 33 * QR_BUYUKLUK)   # ~25 modül + sessiz bölge
+    # Blok (metin + barkod + varsa üst/alt logo) sınırları
+    ustler = [y for _, y, _ in satirlar]
+    altlar = [y + h for _, y, h in satirlar]
+    if barkod_w:
+        ustler.append(barkod_y); altlar.append(barkod_y + barkod_h)
+    if qr and payload:
+        ustler.append(qr_y); altlar.append(qr_y + 33 * QR_BUYUKLUK)   # ~25 modül + sessiz bölge
+
+    def yatay_hiza():
+        if LOGO_HIZA == "sol":
+            return SOL_DOT
+        if LOGO_HIZA == "sag":
+            return GENISLIK_DOT - SOL_DOT - logo["w"]
+        return (GENISLIK_DOT - logo["w"]) // 2
+
+    if konum == "ust":
+        logo_x = yatay_hiza()
+        logo_y = mm(LOGO_Y_MM or 0)
         if ustler:
-            ust, alt = min(ustler), max(altlar)
-            kaydir = (YUKSEKLIK_DOT - (alt - ust)) // 2 - ust
-            kaydir = max(kaydir, -ust)                      # üstten taşmasın
+            # metin bloğunun tepesi logonun altına gelsin
+            kaydir = logo_y + logo["h"] + bosluk - min(ustler)
             satirlar = [(m, y + kaydir, h) for m, y, h in satirlar]
-            barkod_y += kaydir
-            qr_y += kaydir
+            barkod_y += kaydir; qr_y += kaydir
+            ustler = [u + kaydir for u in ustler]; altlar = [a + kaydir for a in altlar]
+        ustler.append(logo_y); altlar.append(logo_y + logo["h"])
+    elif konum == "alt":
+        logo_x = yatay_hiza()
+        logo_y = (max(altlar) + bosluk) if altlar else mm(LOGO_Y_MM or 0)
+        ustler.append(logo_y); altlar.append(logo_y + logo["h"])
+    elif konum in ("sag", "sol"):
+        logo_x = SOL_DOT if konum == "sol" else GENISLIK_DOT - SOL_DOT - logo["w"]
+        logo_y = mm(LOGO_Y_MM) if LOGO_Y_MM is not None else (YUKSEKLIK_DOT - logo["h"]) // 2
+    elif konum == "serbest":
+        logo_x, logo_y = mm(LOGO_X_MM), mm(LOGO_Y_MM or 0)
 
-    return dict(satirlar=satirlar, payload=payload, barkod_w=barkod_w,
-                barkod_y=barkod_y, barkod_h=barkod_h, qr_y=qr_y, qr_x=qr_x)
+    if DIKEY_ORTALA and ustler:
+        ust, alt = min(ustler), max(altlar)
+        kaydir = (YUKSEKLIK_DOT - (alt - ust)) // 2 - ust
+        kaydir = max(kaydir, -ust)                      # üstten taşmasın
+        satirlar = [(m, y + kaydir, h) for m, y, h in satirlar]
+        barkod_y += kaydir
+        qr_y += kaydir
+        if konum in ("ust", "alt"):
+            logo_y += kaydir
+
+    if logo and konum in ("ust", "alt", "sag", "sol"):
+        en_alt = max(altlar + [logo_y + logo["h"]]) if altlar else logo_y + logo["h"]
+        if en_alt > YUKSEKLIK_DOT:
+            uyarilar.append("logo ile birlikte yerleşim etiketin altından %.1f mm taşıyor; "
+                            "logoyu küçültün ya da satır aralığını daraltın"
+                            % ((en_alt - YUKSEKLIK_DOT) / DPMM))
+
+    return dict(satirlar=satirlar, metin_x=metin_x, metin_w=metin_w,
+                payload=payload, barkod_w=barkod_w, barkod_x=metin_x,
+                barkod_y=barkod_y, barkod_h=barkod_h, qr_y=qr_y, qr_x=qr_x,
+                logo=logo, logo_x=logo_x, logo_y=logo_y)
 
 
 def etiket_zpl(e, kopya=1, barkod=False, qr=False, tr_ascii=False, uyarilar=None):
@@ -509,7 +703,7 @@ def etiket_zpl(e, kopya=1, barkod=False, qr=False, tr_ascii=False, uyarilar=None
 
     for metin, y, h in Y["satirlar"]:
         out.append("^FO%d,%d^A0N,%d,%d^FB%d,1,0,L,0^FD%s^FS"
-                   % (SOL_DOT, y, h, h, KULLANILABILIR_DOT, metin))
+                   % (Y["metin_x"], y, h, h, Y["metin_w"], metin))
 
     if qr and Y["payload"]:
         out.append("^FO%d,%d^BQN,2,%d,M,7^FDMM,A%s^FS"
@@ -517,8 +711,12 @@ def etiket_zpl(e, kopya=1, barkod=False, qr=False, tr_ascii=False, uyarilar=None
     elif Y["barkod_w"]:
         out.append("^BY%d,3,%d" % (Y["barkod_w"], Y["barkod_h"]))
         out.append("^FO%d,%d^BCN,%d,%s,N,N,A^FD%s^FS"
-                   % (SOL_DOT, Y["barkod_y"], Y["barkod_h"],
+                   % (Y["barkod_x"], Y["barkod_y"], Y["barkod_h"],
                       "Y" if BARKOD_HRI else "N", zpl_guvenli(Y["payload"])))
+
+    if Y["logo"]:
+        # Grafik iş başlığında ~DG ile yüklenmiştir (bkz. is_basligi); burada çağrılır
+        out.append("^FO%d,%d%s^FS" % (Y["logo_x"], Y["logo_y"], Y["logo"]["xg"]))
 
     if kopya > 1:
         out.append("^PQ%d,0,0,N" % kopya)
@@ -527,12 +725,16 @@ def etiket_zpl(e, kopya=1, barkod=False, qr=False, tr_ascii=False, uyarilar=None
 
 
 def is_basligi():
-    """İşin başında bir kez gönderilen yazıcı ayarları."""
+    """İşin başında bir kez gönderilen yazıcı ayarları (+ varsa logo bitmap'i)."""
     p = ["^XA", "^CI28", "^PW%d" % GENISLIK_DOT, "^LL%d" % YUKSEKLIK_DOT,
          "^LH0,0", "^LS0", "^MNY", "^PR%d" % YAZDIRMA_HIZI]
     if KARARTMA is not None:
         p.append("^MD%d" % KARARTMA)
     p.append("^XZ")
+    logo = logo_hazirla()
+    if logo:
+        # ~DG, ^XA/^XZ dışında tek başına gönderilir; yazıcı RAM'ine yazar
+        p.append("\n" + logo["dg"])
     return "".join(p) + "\n"
 
 
@@ -602,7 +804,15 @@ def etiket_ciz(d, e, cx, cy, k, barkod=False, qr=False, tr_ascii=False):
     Y = etiket_yerlesim(e, tr_ascii, barkod, qr)
     for metin, y, h in Y["satirlar"]:
         f = _onizleme_font(max(1, int(h * k)))
-        d.text((cx + SOL_DOT * k, cy + y * k), metin, font=f, fill=(0, 0, 0))
+        d.text((cx + Y["metin_x"] * k, cy + y * k), metin, font=f, fill=(0, 0, 0))
+
+    if Y["logo"]:
+        from PIL import Image, ImageOps
+        lg = Y["logo"]
+        # '1' modunda siyah = 0; bitmap() dolu (sıfır olmayan) pikselleri boyar -> tersle
+        maske = ImageOps.invert(lg["img"].convert("L")).resize(
+            (lg["img"].width * k, lg["h"] * k), Image.NEAREST)
+        d.bitmap((cx + Y["logo_x"] * k, cy + Y["logo_y"] * k), maske, fill=(0, 0, 0))
 
     if qr and Y["payload"]:
         qw = int(25 * QR_BUYUKLUK * k)
@@ -610,7 +820,7 @@ def etiket_ciz(d, e, cx, cy, k, barkod=False, qr=False, tr_ascii=False):
         d.rectangle([x0, y0, x0 + qw, y0 + qw], outline=(0, 0, 0))
         d.text((x0 + 3, y0 + 3), "QR", font=_onizleme_font(max(10, 6 * k)), fill=(120, 120, 120))
     elif Y["barkod_w"]:
-        x = cx + SOL_DOT * k
+        x = cx + Y["barkod_x"] * k
         y0 = cy + Y["barkod_y"] * k
         y1 = y0 + Y["barkod_h"] * k
         siyah = True
@@ -838,6 +1048,8 @@ def aralik_uygula(etiketler, bas, son, by_label, sheet_adi):
 # --------------------------------------------------------------------------
 
 def main():
+    global LOGO_DOSYA, LOGO_KONUM, LOGO_GENISLIK_MM, LOGO_YUKSEKLIK_MM, LOGO_HIZA
+    global LOGO_X_MM, LOGO_Y_MM, LOGO_ESIK, LOGO_NOKTALA
     p = argparse.ArgumentParser(
         prog="etiket_bas.py",
         description="Excel'den Zebra ZD220 için 50x30 mm demirbaş etiketi basar.",
@@ -867,6 +1079,21 @@ def main():
     p.add_argument("--qr", action="store_true", help="Seri noyu QR kod olarak da bas")
     p.add_argument("--tr-ascii", action="store_true",
                    help="Türkçe karakterleri ASCII'ye çevir (yazıcı fontu basamıyorsa)")
+    p.add_argument("--logo", metavar="DOSYA",
+                   help="Etikete logo bas (SVG, PNG, JPG...). Siyah-beyaz bitmap olarak gönderilir.")
+    p.add_argument("--logo-konum", choices=["ust", "alt", "sag", "sol", "serbest"],
+                   help="Logo konumu (varsayılan: %s)" % LOGO_KONUM)
+    p.add_argument("--logo-boyut", metavar="GxY",
+                   help="Logo kutusu mm, örn. 20x6 (varsayılan %gx%g). En-boy oranı korunur."
+                        % (LOGO_GENISLIK_MM, LOGO_YUKSEKLIK_MM))
+    p.add_argument("--logo-hiza", choices=["sol", "orta", "sag"],
+                   help="ust/alt konumda yatay hiza (varsayılan: %s)" % LOGO_HIZA)
+    p.add_argument("--logo-xy", metavar="X,Y",
+                   help="serbest konumda sol,üst uzaklık mm (örn. 30,2). sag/sol konumda yalnız Y.")
+    p.add_argument("--logo-esik", type=int, metavar="0-255",
+                   help="Gri -> siyah eşiği (varsayılan %d)" % LOGO_ESIK)
+    p.add_argument("--logo-noktala", action="store_true",
+                   help="Gri tonları noktalama (dither) ile bas")
     p.add_argument("--printer", help="Yazıcı adı. Verilmezse kurulu yazıcılardan seçtirir.")
     p.add_argument("--printers", action="store_true", help="Kurulu yazıcıları listele")
     p.add_argument("--ip", help="Yazıcı IP adresi (RAW). --printer yerine kullanılır.")
@@ -891,6 +1118,35 @@ def main():
         sys.exit("HATA: --copies en az 1 olmalı.")
     if a.barkod and a.qr:
         sys.exit("HATA: --barkod ve --qr aynı anda kullanılamaz.")
+
+    if a.logo:
+        LOGO_DOSYA = a.logo
+    if a.logo_konum:
+        LOGO_KONUM = a.logo_konum
+    if a.logo_boyut:
+        try:
+            g, y = a.logo_boyut.lower().replace(",", ".").split("x")
+            LOGO_GENISLIK_MM, LOGO_YUKSEKLIK_MM = float(g), float(y)
+        except ValueError:
+            sys.exit("HATA: --logo-boyut GxY biçiminde olmalı, örn. 20x6")
+    if a.logo_hiza:
+        LOGO_HIZA = a.logo_hiza
+    if a.logo_xy:
+        try:
+            parcalar = [float(v) for v in a.logo_xy.replace(";", ",").split(",")]
+            if len(parcalar) == 2:
+                LOGO_X_MM, LOGO_Y_MM = parcalar
+            elif len(parcalar) == 1:
+                LOGO_Y_MM = parcalar[0]
+            else:
+                raise ValueError
+        except ValueError:
+            sys.exit("HATA: --logo-xy X,Y biçiminde olmalı, örn. 30,2")
+    if a.logo_esik is not None:
+        LOGO_ESIK = a.logo_esik
+    if a.logo_noktala:
+        LOGO_NOKTALA = True
+    logo = logo_hazirla()          # dosya yoksa/bozuksa burada hata verir
 
     wb = excel_yukle(a.excel)
 
@@ -971,6 +1227,10 @@ def main():
           % (ETIKET_GENISLIK_MM, ETIKET_YUKSEKLIK_MM, GENISLIK_DOT, YUKSEKLIK_DOT, DPMM))
     if a.barkod or a.qr:
         print("  Ek kod           : %s" % ("QR" if a.qr else "Code 128"))
+    if logo:
+        print("  Logo             : %s  (%d x %d nokta = %.1f x %.1f mm, konum: %s)"
+              % (os.path.basename(logo["yol"]), logo["w"], logo["h"],
+                 logo["w"] / DPMM, logo["h"] / DPMM, LOGO_KONUM))
     print("=" * 72)
     for u in dict.fromkeys(zpl_uyari):
         print("  ! %s" % u)

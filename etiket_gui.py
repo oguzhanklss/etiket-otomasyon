@@ -271,8 +271,52 @@ class Uygulama(ctk.CTk):
         self.f_barkod.pack_forget()
         self.f_qr.pack_forget()
 
-        # ---- 8. Diğer
-        self._baslik("8. Diğer")
+        # ---- 8. Logo
+        self._baslik("8. Logo")
+        f = self._satir_cercevesi()
+        self.e_logo = ctk.CTkEntry(f, width=300, placeholder_text="SVG / PNG / JPG dosyası…")
+        self.e_logo.pack(side="left", padx=(0, 6))
+        self.e_logo.bind("<KeyRelease>", lambda _e: self._yenile_planla())
+        ctk.CTkButton(f, text="Seç…", width=60, command=self._logo_sec).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(f, text="✕", width=30, fg_color="transparent", border_width=1,
+                      text_color=("gray20", "gray80"), command=self._logo_kaldir).pack(side="left")
+        f = self._satir_cercevesi()
+        ctk.CTkLabel(f, text="Konum").pack(side="left", padx=(0, 6))
+        self.seg_logo = ctk.CTkSegmentedButton(f, values=["Üst", "Alt", "Sağ", "Sol", "Serbest"],
+                                               command=lambda _v: self._logo_konumu_degisti())
+        self.seg_logo.set("Üst")
+        self.seg_logo.pack(side="left")
+        f = self._satir_cercevesi()
+        self.e_logo_gen = self._girdi(f, "Genişlik", 50, "%g" % E.LOGO_GENISLIK_MM)
+        self.e_logo_yuk = self._girdi(f, "Yükseklik", 50, "%g" % E.LOGO_YUKSEKLIK_MM)
+        self.e_logo_bosluk = self._girdi(f, "Boşluk", 44, "%g" % E.LOGO_BOSLUK_MM)
+        ctk.CTkLabel(f, text="mm", text_color=("gray30", "gray70")).pack(side="left")
+        self.f_logo_hiza = self._satir_cercevesi()
+        ctk.CTkLabel(self.f_logo_hiza, text="Yatay hiza").pack(side="left", padx=(0, 6))
+        self.cb_logo_hiza = ctk.CTkComboBox(self.f_logo_hiza, width=90, state="readonly",
+                                            values=["Sol", "Orta", "Sağ"],
+                                            command=lambda _v: self._yenile_planla())
+        self.cb_logo_hiza.set("Orta")
+        self.cb_logo_hiza.pack(side="left", padx=(0, 12))
+        self.e_logo_ust = self._girdi(self.f_logo_hiza, "Üst boşluk", 44, "0")
+        self.f_logo_xy = self._satir_cercevesi()
+        self.e_logo_x = self._girdi(self.f_logo_xy, "Sol (mm)", 50, "%g" % E.LOGO_X_MM)
+        self.e_logo_y = self._girdi(self.f_logo_xy, "Üst (mm)", 50, "")
+        self.l_logo_y_bilgi = ctk.CTkLabel(self.f_logo_xy, text="", text_color=("gray30", "gray70"))
+        self.l_logo_y_bilgi.pack(side="left")
+        f = self._satir_cercevesi()
+        self.e_logo_esik = self._girdi(f, "Siyah eşiği (0-255)", 50, str(E.LOGO_ESIK))
+        self.ck_logo_noktala = ctk.CTkCheckBox(f, text="Gri tonları noktala", command=self._yenile_planla)
+        self.ck_logo_noktala.pack(side="left")
+        self.l_logo_bilgi = ctk.CTkLabel(self.sol, anchor="w", justify="left", wraplength=440,
+                                         text_color=("gray30", "gray70"),
+                                         text="Logo yazıcıya siyah-beyaz bitmap olarak gönderilir; "
+                                              "en-boy oranı korunarak kutuya sığdırılır.")
+        self.l_logo_bilgi.pack(fill="x", padx=8)
+        self._logo_konumu_degisti(yenile=False)
+
+        # ---- 9. Diğer
+        self._baslik("9. Diğer")
         f = self._satir_cercevesi()
         self.ck_trascii = ctk.CTkCheckBox(f, text="Türkçe karakterleri ASCII'ye çevir",
                                           command=self._yenile_planla)
@@ -287,8 +331,8 @@ class Uygulama(ctk.CTk):
                           "çıkıyorsa düşürün (örn. -5). Hız 2-6; yavaş = daha net."
                      ).pack(fill="x", padx=8)
 
-        # ---- 9. Yazıcı
-        self._baslik("9. Yazıcı")
+        # ---- 10. Yazıcı
+        self._baslik("10. Yazıcı")
         f = self._satir_cercevesi()
         self.seg_yazici = ctk.CTkSegmentedButton(f, values=["Kurulu yazıcı", "Ağ (IP)"],
                                                  command=lambda _v: self._yazici_modu_degisti())
@@ -437,6 +481,39 @@ class Uygulama(ctk.CTk):
             self.f_qr.pack(fill="x", padx=6, pady=1, after=self.seg_kod.master)
         self._yenile_planla()
 
+    def _logo_sec(self):
+        yol = filedialog.askopenfilename(
+            parent=self, title="Logo dosyası seçin",
+            filetypes=[("Görüntü", "*.svg *.svgz *.png *.jpg *.jpeg *.bmp *.gif *.webp"),
+                       ("SVG", "*.svg *.svgz"), ("Tümü", "*.*")])
+        if yol:
+            self.e_logo.delete(0, "end")
+            self.e_logo.insert(0, yol)
+            self._yenile_planla(hemen=True)
+
+    def _logo_kaldir(self):
+        self.e_logo.delete(0, "end")
+        self._yenile_planla(hemen=True)
+
+    def _logo_konumu(self):
+        return {"Üst": "ust", "Alt": "alt", "Sağ": "sag", "Sol": "sol", "Serbest": "serbest"}[
+            self.seg_logo.get()]
+
+    def _logo_konumu_degisti(self, yenile=True):
+        k = self._logo_konumu()
+        self.f_logo_hiza.pack_forget()
+        self.f_logo_xy.pack_forget()
+        if k in ("ust", "alt"):
+            self.f_logo_hiza.pack(fill="x", padx=6, pady=1, after=self.seg_logo.master)
+            # üst boşluk yalnız "ust" konumda anlamlı
+            self.e_logo_ust.configure(state="normal" if k == "ust" else "disabled")
+        else:
+            self.f_logo_xy.pack(fill="x", padx=6, pady=1, after=self.seg_logo.master)
+            self.e_logo_x.configure(state="normal" if k == "serbest" else "disabled")
+            self.l_logo_y_bilgi.configure(text="" if k == "serbest" else "boş = dikey ortala")
+        if yenile:
+            self._yenile_planla()
+
     def _yazici_modu_degisti(self):
         if self.seg_yazici.get() == "Ağ (IP)":
             self.f_yazici.pack_forget()
@@ -570,6 +647,38 @@ class Uygulama(ctk.CTk):
         E.QR_X_MM = sayi(self.e_qr_x.get(), E.QR_X_MM)
         E.QR_Y_MM = sayi(self.e_qr_y.get(), E.QR_Y_MM)
         E.QR_BUYUKLUK = max(1, min(10, sayi(self.e_qr_b.get(), E.QR_BUYUKLUK, tam=True) or 4))
+
+        E.LOGO_DOSYA = ""
+        yol = self.e_logo.get().strip()
+        konum = self._logo_konumu()
+        if yol:
+            E.LOGO_KONUM = konum
+            E.LOGO_GENISLIK_MM = max(1.0, sayi(self.e_logo_gen.get(), E.LOGO_GENISLIK_MM) or 1.0)
+            E.LOGO_YUKSEKLIK_MM = max(0.5, sayi(self.e_logo_yuk.get(), E.LOGO_YUKSEKLIK_MM) or 0.5)
+            E.LOGO_BOSLUK_MM = max(0.0, sayi(self.e_logo_bosluk.get(), 0.0) or 0.0)
+            E.LOGO_HIZA = {"Sol": "sol", "Orta": "orta", "Sağ": "sag"}[self.cb_logo_hiza.get()]
+            E.LOGO_X_MM = sayi(self.e_logo_x.get(), 0.0) or 0.0
+            if konum == "ust":
+                E.LOGO_Y_MM = sayi(self.e_logo_ust.get(), 0.0) or 0.0
+            else:
+                E.LOGO_Y_MM = sayi(self.e_logo_y.get(), None)
+            E.LOGO_ESIK = max(0, min(255, sayi(self.e_logo_esik.get(), E.LOGO_ESIK, tam=True) or 0))
+            E.LOGO_NOKTALA = bool(self.ck_logo_noktala.get())
+            if not os.path.exists(yol):
+                self.l_logo_bilgi.configure(text="Logo dosyası bulunamadı, logo basılmayacak: %s" % yol)
+            else:
+                E.LOGO_DOSYA = yol
+                try:
+                    lg = E.logo_hazirla()
+                    self.l_logo_bilgi.configure(
+                        text="Logo: %d x %d nokta = %.1f x %.1f mm. Yazıcıya siyah-beyaz bitmap "
+                             "olarak gönderilir." % (lg["w"], lg["h"], lg["w"] / E.DPMM, lg["h"] / E.DPMM))
+                except SystemExit as ex:
+                    E.LOGO_DOSYA = ""
+                    self.l_logo_bilgi.configure(text=hata_metni(ex).replace("\n      ", " "))
+        else:
+            self.l_logo_bilgi.configure(text="Logo yok. SVG, PNG veya JPG dosyası seçin; "
+                                             "siyah-beyaz bitmap olarak basılır.")
 
         m = self._kod_modu()
         return {
@@ -718,10 +827,12 @@ class Uygulama(ctk.CTk):
             "İlk          : satır %d  %s\n"
             "Son          : satır %d  %s\n"
             "Bu etiket    : %s\n"
-            "Etiket       : %g x %g mm  (%d x %d nokta)%s"
+            "Etiket       : %g x %g mm  (%d x %d nokta)%s%s"
             % (self._secili_sheet(), len(self.secim), ayar["kopya"], toplam,
                ilk.satir, ilk.urun, son.satir, son.urun, satirlar,
                E.ETIKET_GENISLIK_MM, E.ETIKET_YUKSEKLIK_MM, E.GENISLIK_DOT, E.YUKSEKLIK_DOT,
+               ("\nLogo         : %s  (%s)" % (os.path.basename(E.LOGO_DOSYA), self.seg_logo.get().lower()))
+               if E.LOGO_DOSYA else "",
                ("\n! " + "\n! ".join(dict.fromkeys(uyari))) if uyari else ""))
 
     def _png_kaydet(self):
@@ -861,6 +972,12 @@ class Uygulama(ctk.CTk):
             "qr_x": self.e_qr_x.get(), "qr_y": self.e_qr_y.get(), "qr_b": self.e_qr_b.get(),
             "tr_ascii": bool(self.ck_trascii.get()),
             "kopya": self.e_kopya.get(),
+            "logo": self.e_logo.get(), "logo_konum": self.seg_logo.get(),
+            "logo_gen": self.e_logo_gen.get(), "logo_yuk": self.e_logo_yuk.get(),
+            "logo_bosluk": self.e_logo_bosluk.get(), "logo_hiza": self.cb_logo_hiza.get(),
+            "logo_ust": self.e_logo_ust.get(), "logo_x": self.e_logo_x.get(),
+            "logo_y": self.e_logo_y.get(), "logo_esik": self.e_logo_esik.get(),
+            "logo_noktala": bool(self.ck_logo_noktala.get()),
             "yazici_modu": self.seg_yazici.get(),
             "yazici": self.cb_yazici.get(),
             "ip": self.e_ip.get(), "port": self.e_port.get(),
@@ -897,9 +1014,24 @@ class Uygulama(ctk.CTk):
                                ("bk_h", self.e_bk_h), ("qr_x", self.e_qr_x), ("qr_y", self.e_qr_y),
                                ("qr_b", self.e_qr_b), ("kopya", self.e_kopya), ("ip", self.e_ip),
                                ("port", self.e_port), ("bas", self.e_bas), ("son", self.e_son),
-                               ("karartma", self.e_karartma), ("hiz", self.e_hiz)):
+                               ("karartma", self.e_karartma), ("hiz", self.e_hiz),
+                               ("logo", self.e_logo), ("logo_gen", self.e_logo_gen),
+                               ("logo_yuk", self.e_logo_yuk), ("logo_bosluk", self.e_logo_bosluk),
+                               ("logo_esik", self.e_logo_esik)):
             if anahtar in a:
                 koy(entry, a[anahtar])
+        # devre dışı girdilere yazabilmek için önce etkinleştir
+        for anahtar, entry in (("logo_ust", self.e_logo_ust), ("logo_x", self.e_logo_x),
+                               ("logo_y", self.e_logo_y)):
+            if anahtar in a:
+                entry.configure(state="normal")
+                koy(entry, a[anahtar])
+        if a.get("logo_konum") in ("Üst", "Alt", "Sağ", "Sol", "Serbest"):
+            self.seg_logo.set(a["logo_konum"])
+        if a.get("logo_hiza") in ("Sol", "Orta", "Sağ"):
+            self.cb_logo_hiza.set(a["logo_hiza"])
+        (self.ck_logo_noktala.select if a.get("logo_noktala") else self.ck_logo_noktala.deselect)()
+        self._logo_konumu_degisti(yenile=False)
         if a.get("dpi"):
             self.cb_dpi.set(a["dpi"])
         if a.get("satirlar"):

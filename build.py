@@ -54,6 +54,7 @@ def main():
            "--name", AD,
            "--add-data", ctk_dir + ayirac + "customtkinter",
            "--collect-submodules", "openpyxl",
+           "--collect-all", "resvg_py",          # SVG logo: derlenmiş modül pakete girsin
            "etiket_gui.py"]
     if os.name == "nt":
         cmd += ["--hidden-import", "win32print", "--hidden-import", "win32timezone"]

@@ -147,6 +147,13 @@ ONIZLEME_SUTUN  = 3    # ızgara sütun sayısı
 | `--barkod` | Seri noyu ayrıca Code 128 barkod olarak basar |
 | `--qr` | Seri noyu ayrıca QR kod olarak basar |
 | `--tr-ascii` | Türkçe karakterleri ASCII'ye çevirir |
+| `--logo DOSYA` | Etikete logo basar (SVG, PNG, JPG…). Bkz. bölüm 6 "Logo" |
+| `--logo-konum K` | `ust` `alt` `sag` `sol` `serbest` |
+| `--logo-boyut GxY` | Logo kutusu mm, örn. `20x6`; en-boy oranı korunur |
+| `--logo-hiza H` | `ust`/`alt` için yatay hiza: `sol` `orta` `sag` |
+| `--logo-xy X,Y` | `serbest` için sol,üst mm; `sag`/`sol` için yalnız `Y` |
+| `--logo-esik N` | Gri → siyah eşiği 0-255 (varsayılan 128) |
+| `--logo-noktala` | Gri tonları noktalayarak (dither) basar |
 | `--printer AD` | Yazıcı adı. Verilmezse kurulu yazıcılardan seçtirir |
 | `--printers` | Kurulu yazıcıları listeler |
 | `--ip ADRES` | Yazıcı IP'si, RAW port 9100 (`--port` ile değiştirilir) |
@@ -279,6 +286,50 @@ ETIKET_YUKSEKLIK_MM = 30.0
 KENAR_BOSLUK_X_MM   = 2.0
 DPMM = 8      # 203 dpi. 300 dpi yazıcıda 12 yapın.
 ```
+
+### Logo
+
+Etikete SVG, PNG veya JPG logo basılabilir. Zebra yazıcı SVG'yi doğrudan
+çizemez; script logoyu yazıcı çözünürlüğünde (203 dpi) **siyah-beyaz bitmap'e**
+çevirir, işin başında `~DG` ile yazıcı belleğine bir kez yükler ve her etikette
+`^XG` ile çağırır. Böylece 800 etiketlik işte bile logo yalnızca bir kez
+gönderilir. SVG için `resvg-py` paketi gerekir (`requirements.txt`'te var);
+PNG/JPG için ek paket gerekmez.
+
+```bash
+python etiket_bas.py "COP-31 DEMİRBAŞLAR.xlsx" --sheet 1 --test --logo logo.svg --logo-konum ust --logo-boyut 20x6 --onizleme
+```
+
+Ayarlar (`etiket_bas.py` başında ya da GUI'deki "8. Logo" bölümünde):
+
+```python
+LOGO_DOSYA        = ""       # boş = logo yok
+LOGO_KONUM        = "ust"    # ust | alt | sag | sol | serbest
+LOGO_GENISLIK_MM  = 20.0     # logo bu kutuya en-boy oranı korunarak sığdırılır
+LOGO_YUKSEKLIK_MM = 6.0
+LOGO_HIZA         = "orta"   # ust/alt için yatay hiza: sol | orta | sag
+LOGO_X_MM         = 2.0      # serbest: sol kenardan uzaklık
+LOGO_Y_MM         = None     # serbest: üstten; sag/sol: None = dikey ortala; ust: üst boşluk
+LOGO_BOSLUK_MM    = 1.5      # logo ile metin arası
+LOGO_ESIK         = 128      # gri -> siyah eşiği; logo soluk çıkıyorsa yükseltin
+LOGO_NOKTALA      = False    # True: gri tonlar noktalama ile taklit edilir
+```
+
+Konumlar:
+
+* **ust / alt** — logo metin bloğunun üstüne/altına eklenir; `DIKEY_ORTALA`
+  açıksa logo da bloğun parçası olarak ortalanır.
+* **sag / sol** — logo kenara yaslanır, metin satırları (ve barkod) logo
+  genişliği + boşluk kadar **daralır**; punto gerekirse otomatik küçülür.
+* **serbest** — `LOGO_X_MM`/`LOGO_Y_MM` ile mutlak konum; metinle etkileşmez,
+  üst üste binmemesine siz dikkat edersiniz.
+
+Önizleme (`--onizleme` ve GUI) yazıcıya giden **aynı bitmap'i** gösterir;
+logonun kaç noktaya çizildiği özette yazar (`144 x 48 nokta = 18.0 x 6.0 mm`).
+Blok etiketten taşarsa uyarı verilir. Renkli logolarda ince/açık renkli
+kısımlar eşik altında kalıp kaybolabilir; `LOGO_ESIK`'i yükseltin ya da
+logonun tek renk (siyah) sürümünü kullanın. Çok küçük logolarda (yükseklik
+< 4 mm) ince detaylar 203 dpi'da seçilmez.
 
 ### Barkod
 
@@ -422,8 +473,9 @@ kapatılırsa "Yenile" düğmesiyle elle yenilenir.
 | **5. Etiket boyutu** | Genişlik / yükseklik / kenar (mm), 203 veya 300 dpi |
 | **6. Etiket satırları** | Her satır için şablon, üst konum ve **punto ayrı ayrı**. Satır ekle/sil, varsayılana dön, dikey ortala |
 | **7. Barkod** | Yok / Code 128 / QR. Açılınca barkodlu düzen tablosu gelir; konum, boyut ve çizgi kalınlığı ayarlanır |
-| **8. Diğer** | Türkçe→ASCII, kopya sayısı, karartma (^MD), baskı hızı |
-| **9. Yazıcı** | Kurulu yazıcı listesi ya da IP:port |
+| **8. Logo** | SVG/PNG/JPG logo; konum (üst/alt/sağ/sol/serbest), kutu boyutu, hiza, eşik |
+| **9. Diğer** | Türkçe→ASCII, kopya sayısı, karartma (^MD), baskı hızı |
+| **10. Yazıcı** | Kurulu yazıcı listesi ya da IP:port |
 
 Sağ panel: ◀ ▶ ile seçimdeki etiketler arasında gezilir, **PNG kaydet** ilk 12
 etiketi tek görüntüde dışa verir. Alttaki özet kutusu seçimi ve uyarıları gösterir.

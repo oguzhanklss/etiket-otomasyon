@@ -12,3 +12,6 @@ Pillow>=9.0
 
 # Grafik arayüz (etiket_gui.py) için.
 customtkinter>=5.2
+
+# Etikete SVG logo basmak için (SVG -> bitmap). PNG/JPG logo Pillow ile çalışır.
+resvg-py>=0.5
